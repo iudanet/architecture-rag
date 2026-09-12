@@ -1,0 +1,83 @@
+@startuml indexing
+title Индексация базы знаний в Qdrant
+
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam ArrowColor #444444
+skinparam NoteBackgroundColor #FFF8DC
+
+|Подготовка корпуса|
+start
+:fetch_corpus.py;
+note right
+  MediaWiki API вики One Piece,
+  action=parse&prop=wikitext.
+  Сырой ответ кэшируется —
+  пересборка работает без сети
+end note
+:очистка разметки;
+note right: шаблоны, ссылки, межвики, HTML
+:anonymize.py;
+note right
+  536 замен по terms_map.json.
+  Граница слова \b + падежное окончание.
+  Без подмены LLM отвечала бы по памяти,
+  а не по индексу
+end note
+:knowledge_base/ — 37 документов;
+
+|Индексация|
+:build_index.py;
+:split_documents();
+note right
+  RecursiveCharacterTextSplitter
+  chunk_size=2400, overlap=300
+  → 419 чанков
+end note
+
+:вычислить position;
+note right
+  find() по исходному тексту:
+  накапливать длины нельзя из-за overlap
+end note
+
+if (is_suspicious(chunk)?) then (да)
+  :пометить suspicious=true;
+  note right: слой 1 защиты
+else (нет)
+endif
+
+:разбить на пачки по 32;
+
+repeat
+  :embed_batch(passage: ...);
+  note right
+    Infinity, USER-bge-m3, 1024 dim.
+    Батч вместо поштучных вызовов:
+    ~5 с/чанк против 4 с на запрос
+  end note
+  :upsert в Qdrant;
+  note right
+    id = uuid5(source:chunk_id) —
+    детерминированный, повторный запуск
+    перезаписывает, а не дублирует.
+    Пачка сразу уходит в базу:
+    в памяти ничего не копится
+  end note
+repeat while (остались чанки?) is (да)
+->нет;
+
+if (переиндексация одного документа?) then (да)
+  :drop_stale_chunks();
+  note right
+    Документ сократился — удалить
+    фрагменты с chunk_id >= нового числа,
+    иначе поиск найдёт удалённый текст
+  end note
+else (нет)
+endif
+
+:419 векторов в коллекции;
+stop
+
+@enduml

@@ -13,8 +13,7 @@ COPY scripts/ ./scripts/
 COPY knowledge_base/ ./knowledge_base/
 COPY data/ ./data/
 
-RUN uv sync --frozen --no-dev
 
 EXPOSE 8000
 
-CMD ["uv", "run", "python", "-m", "rag.api", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "--no-sync", "python", "-m", "rag.api", "--host", "0.0.0.0", "--port", "8000"]

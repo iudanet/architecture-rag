@@ -1,0 +1,70 @@
+@startuml query-pipeline
+title Обработка вопроса: путь от запроса к ответу
+
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam ArrowColor #444444
+skinparam NoteBackgroundColor #FFF8DC
+
+actor Пользователь as user
+participant "FastAPI\n/ask" as api
+participant "pipeline.answer()" as pipe
+database "Qdrant\nknowledge_base" as qdrant
+participant "Infinity\nUSER-bge-m3" as emb
+participant "security.py" as sec
+participant "prompts.py" as prompts
+participant "YandexGPT 5.1" as llm
+
+user -> api : вопрос
+activate api
+api -> pipe : answer(question)
+activate pipe
+
+pipe -> emb : embed(question, is_query=True)
+note right : префикс "query: "
+emb --> pipe : вектор 1024
+
+pipe -> qdrant : query_points(top_k=5)
+note right
+  Слой 1 (ingest):
+  фильтр must_not suspicious=true
+  помеченные чанки не выходят из базы
+end note
+qdrant --> pipe : чанки со score
+
+pipe -> pipe : отсечь score < 0.45
+note right
+  Порог релевантности.
+  Если ничего не осталось —
+  "Я не знаю" БЕЗ вызова LLM
+end note
+
+pipe -> sec : filter_chunks(chunks)
+note right
+  Слой 2 (retrieve):
+  повторная проверка текста
+  на паттерны инъекций
+end note
+sec --> pipe : безопасные чанки
+
+pipe -> sec : sanitize(text)
+sec --> pipe : очищенный текст
+
+pipe -> prompts : build_messages(question, chunks)
+note right
+  Слой 3 (prompt):
+  документы объявлены данными,
+  а не инструкциями
+  + few-shot + Chain-of-Thought
+end note
+prompts --> pipe : сообщения
+
+pipe -> llm : chat.completions.create()
+llm --> pipe : ответ с рассуждением
+
+pipe --> api : answer, citations, max_score
+deactivate pipe
+api --> user : ответ + источники со score
+deactivate api
+
+@enduml

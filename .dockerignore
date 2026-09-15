@@ -1,0 +1,14 @@
+# Модель весит ~1.1 ГБ и монтируется в контейнер с диска (см. docker-compose.yml),
+# в образ бота она попадать не должна
+models/
+
+.venv/
+__pycache__/
+*.pyc
+.git/
+.pytest_cache/
+.ruff_cache/
+tmp/
+docs/
+.env
+qdrant_storage/

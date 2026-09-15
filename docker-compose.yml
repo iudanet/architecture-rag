@@ -1,0 +1,82 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    # В образе нет curl/wget, поэтому проверяем доступность REST-порта через bash /dev/tcp
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/6333"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Сервис эмбеддингов: локальный инференс USER-bge-m3 в контуре.
+  # Модель монтируется с диска — из сети ничего не качается.
+  embeddings:
+    image: ${EMBED_IMAGE:-michaelf34/infinity:latest-cpu}
+    restart: unless-stopped
+    ports:
+      - "7997:7997"
+    volumes:
+      - ./models:/models:ro
+    environment:
+      DO_NOT_TRACK: "1"
+    # Без --no-bettertransformer HTTP-сервер зависает на калибровке при старте
+    command: >
+      v2
+      --engine torch
+      --model-id /models/USER-bge-m3
+      --port 7997
+      --no-bettertransformer
+      --batch-size 8
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:7997/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  bot:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - EMBED_BASE_URL=http://embeddings:7997
+      - EMBED_MODEL=/models/USER-bge-m3
+      - EMBED_DIM=${EMBED_DIM:-1024}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://ai.api.cloud.yandex.net/v1}
+      - LLM_MODEL=${LLM_MODEL:-}
+      - YANDEX_FOLDER_ID=${YANDEX_FOLDER_ID:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - QDRANT_COLLECTION=${QDRANT_COLLECTION:-knowledge_base}
+      - TOP_K=${TOP_K:-5}
+      - SCORE_THRESHOLD=${SCORE_THRESHOLD:-0.45}
+      - SECURITY_INGEST_FILTER=${SECURITY_INGEST_FILTER:-true}
+      - SECURITY_RETRIEVE_FILTER=${SECURITY_RETRIEVE_FILTER:-true}
+      - SECURITY_PROMPT_GUARD=${SECURITY_PROMPT_GUARD:-true}
+      # Прокси опционален: пустое значение — прямой выход в сеть
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - NO_PROXY=qdrant,embeddings,localhost,127.0.0.1
+    # В образе бота нет curl — проверяем /health встроенным python3 (urllib)
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      embeddings:
+        condition: service_healthy
+
+volumes:
+  qdrant_data:

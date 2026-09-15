@@ -1,0 +1,30 @@
+@startuml containers
+!include <C4/C4_Container>
+
+title Контейнеры системы (C4 level 2)
+
+Person(user, "Сотрудник", "Задаёт вопросы по внутренней документации")
+
+System_Boundary(contour, "Закрытый контур (docker compose)") {
+    Container(bot, "RAG-бот", "Python 3.12, FastAPI", "Веб-чат, /ask, /kb.\nПоиск, три слоя защиты,\nсборка промпта")
+    ContainerDb(qdrant, "Qdrant", "Векторная БД", "419 чанков, 1024 dim.\nПоиск по косинусу,\nфильтрация по метаданным")
+    Container(infinity, "Infinity", "Сервис эмбеддингов", "deepvk/USER-bge-m3.\nМодель смонтирована с диска,\nв сеть не ходит")
+    ContainerDb(kb, "knowledge_base/", "Файлы Markdown", "37 документов\nс подменёнными терминами")
+}
+
+System_Ext(llm, "YandexGPT 5.1", "Облачный API Yandex AI Studio.\nOpenAI-совместимый")
+
+Rel(user, bot, "Вопрос, чтение источников", "HTTPS")
+Rel(bot, infinity, "Эмбеддинг вопроса", "HTTP, OpenAI-совместимый")
+Rel(bot, qdrant, "Поиск похожих чанков", "HTTP")
+Rel(bot, kb, "Отдаёт исходный документ по ссылке", "файловая система")
+Rel(bot, llm, "Промпт с найденным контекстом", "HTTPS")
+
+note right of llm
+  Единственный выход наружу.
+  Эмбеддинги считаются локально,
+  документы контур не покидают
+end note
+
+SHOW_LEGEND()
+@enduml
